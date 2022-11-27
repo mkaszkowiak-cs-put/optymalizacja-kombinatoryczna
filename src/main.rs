@@ -206,13 +206,21 @@ fn main() {
     let items: Vec<Item> = generator.generate();
     
     for solver in solvers {
-        let items_copy: Vec<Item> = items.clone();
-        let result: Vec<Container> = solver.solve(items_copy);
+        for sorted in [true, false] {
+            let mut items_copy: Vec<Item> = items.clone();
+            if sorted {
+                items_copy.sort_unstable_by_key(|x| x.size);
+                items_copy.reverse();
+            }
+            let result: Vec<Container> = solver.solve(items_copy);
 
-        println!("Results for {:} - {:} containers", solver.get_name(), result.len());
-        for container in result {
-            //println!("Container [{:} / {:}] ", container.total, container.size);
+            println!("Results for {:} {:} - {:} containers", if sorted {"Desc-sorted"} else {"Unsorted"}, solver.get_name(), result.len());
         }
+        
+        
+        /*for container in result {
+            println!("Container [{:} / {:}] ", container.total, container.size);
+        }*/
     }
     
 }
