@@ -1,0 +1,18 @@
+{
+    "solvers": [
+        {"id": "First Fit", "sorted": true},
+        {"id": "First Fit", "sorted": false},
+        {"id": "Next Fit", "sorted": true},
+        {"id": "Next Fit", "sorted": false}
+    ],
+
+    "generator_settings": {
+        "item_size_min": 0,
+        "item_size_max": 100,
+        "item_limit": 5000
+    },
+
+    "solver_settings": {
+        "container_size": 400
+    }
+}
