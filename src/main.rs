@@ -3,8 +3,10 @@ I will consider one-dimensional offline bin packing problem
 One-dimensional, as in objects and containers only have a single dimension
 Offline, as in all object dimensions are known before-hand 
 */
-use rand::Rng;
+use rand::{thread_rng, Rng};
 use std::fs;
+use rand::seq::SliceRandom;
+
 use serde::{Deserialize, Serialize};
 use serde_json::Result;
 
@@ -43,45 +45,65 @@ impl Container {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
-struct GeneratorSettings {
+struct Settings {
     item_size_min: u32,
     item_size_max: u32,
-    item_limit: u32
+    item_limit: u32,
+    container_size: u32
+}
+
+struct GeneratorResults {
+    items: Vec<Item>,
+    optimal_container_count: u32
 }
 
 #[derive(Clone)]
 struct Generator {
-    settings: GeneratorSettings
+    settings: Settings
 }
 
 impl Generator {
-    fn generate(&self) -> Vec<Item> {
+    fn generate(&self) -> GeneratorResults {
+        let mut current_size = 0;
+        let mut containers = 0;
+
         let mut items: Vec<Item> = Vec::new();
-        for _ in 0..self.settings.item_limit {
-            items.push(self.generate_item());
-        }
+        for n in 0..self.settings.item_limit {
+            if current_size == 0 {
+                containers += 1;
+            }
 
-        return items;
-    }
-    
-    fn generate_item(&self) -> Item {
-        Item {
-            size: rand::thread_rng().gen_range(
+            let mut size: u32 = rand::thread_rng().gen_range(
                 self.settings.item_size_min..self.settings.item_size_max
-            )
+            );
+
+            let item_overflows_current_container: bool = (current_size + size) > self.settings.container_size;
+            let last_item_to_generate: bool = n == self.settings.item_limit - 1;
+
+            if item_overflows_current_container || last_item_to_generate {
+                let biggest_item_possible_to_fit: u32 = self.settings.container_size - current_size;
+                size = biggest_item_possible_to_fit;
+            }
+
+            items.push(Item {
+                size: size 
+            });
+
+            current_size = (current_size + size) % self.settings.container_size;
         }
+
+        items.shuffle(&mut thread_rng());
+
+        return GeneratorResults {
+            items: items,
+            optimal_container_count: containers
+        };
     }
 }
-
-#[derive(Clone, Serialize, Deserialize)]
-struct SolverSettings {
-    container_size: u32
-}
-
 
 trait Solver {
     fn solve(&self, input: Vec<Item>) -> Vec<Container>;
-    fn get_settings(&self) -> &SolverSettings;
+    fn get_settings(&self) -> &Settings;
     fn get_name(&self) -> String;
     fn new_container(&self) -> Container {
         return Container::new(self.get_settings().container_size);
@@ -89,13 +111,13 @@ trait Solver {
 }
 
 struct SolverNextFit {
-    settings: SolverSettings
+    settings: Settings
 }
 
 impl Solver for SolverNextFit {
     /* Next Fit (NF) always keeps a single open bin. 
     When the new item does not fit into it, it closes the current bin and opens a new bin */
-    fn get_settings(&self) -> &SolverSettings {
+    fn get_settings(&self) -> &Settings {
         return &self.settings;
     }
 
@@ -135,13 +157,13 @@ impl Solver for SolverNextFit {
 }
 
 struct SolverFirstFit {
-    settings: SolverSettings
+    settings: Settings
 }
 
 impl Solver for SolverFirstFit {
     /* First-Fit (FF) keeps all bins open, in the order in which they were opened. 
     It attempts to place each new item into the first bin in which it fits. */
-    fn get_settings(&self) -> &SolverSettings {
+    fn get_settings(&self) -> &Settings {
         return &self.settings;
     }
 
@@ -196,14 +218,13 @@ struct SolverListItem {
 #[derive(Clone, Serialize, Deserialize)]
 struct ProgramInput {
     solvers: Vec<SolverListItem>,
-    generator_settings: GeneratorSettings,
-    solver_settings: SolverSettings
+    settings: Vec<Settings>
 }
 
-fn generate_solver(string: String, solver_settings: SolverSettings) -> Option<Box<dyn Solver>> {
+fn generate_solver(string: String, settings: Settings) -> Option<Box<dyn Solver>> {
     match string.as_str() {
-        "Next Fit" => Some(Box::new(SolverNextFit {settings: solver_settings})),
-        "First Fit" => Some(Box::new(SolverFirstFit {settings: solver_settings})),
+        "Next Fit" => Some(Box::new(SolverNextFit {settings: settings})),
+        "First Fit" => Some(Box::new(SolverFirstFit {settings: settings})),
         _ => None
     }
 }
@@ -216,30 +237,31 @@ fn main() {
 
     let program_input: ProgramInput = serde_json::from_str(&data[..]).unwrap();
     
-    let generator_settings: GeneratorSettings = program_input.generator_settings;
-    let solver_settings: SolverSettings = program_input.solver_settings;
-
-    let generator: Generator = Generator { settings: generator_settings.clone() };
-    let mut solvers: Vec<Box<dyn Solver>> = Vec::new();
-
-    let items: Vec<Item> = generator.generate();
+    for settings in program_input.settings {
+        let generator: Generator = Generator { 
+            settings: settings.clone()
+        };
+        let mut solvers: Vec<Box<dyn Solver>> = Vec::new();
     
-    for solver_list_item in program_input.solvers {
-        let solver = generate_solver(solver_list_item.id, solver_settings.clone()).unwrap();
-        let sorted = solver_list_item.sorted;
-        let mut items_copy: Vec<Item> = items.clone();
-        if sorted {
-            items_copy.sort_unstable_by_key(|x| x.size);
-            items_copy.reverse();
-        }
-        let result: Vec<Container> = solver.solve(items_copy);
-
-        println!("Results for {:} {:} - {:} containers", if sorted {"Desc-sorted"} else {"Unsorted"}, solver.get_name(), result.len());
+        let generator_results: GeneratorResults = generator.generate();
+        let items: Vec<Item> = generator_results.items;
     
+        println!("Optimal solution: {:} containers", generator_results.optimal_container_count);
+
+        let solvers_list = program_input.solvers.clone();
         
-        /*for container in result {
-            println!("Container [{:} / {:}] ", container.total, container.size);
-        }*/
+        for solver_list_item in solvers_list {
+            let solver = generate_solver(solver_list_item.id, settings.clone()).unwrap();
+            let sorted = solver_list_item.sorted;
+            let mut items_copy: Vec<Item> = items.clone();
+            if sorted {
+                items_copy.sort_unstable_by_key(|x| x.size);
+                items_copy.reverse();
+            }
+            let result: Vec<Container> = solver.solve(items_copy);
+    
+            println!("Results for {:} {:} - {:} containers", if sorted {"Desc-sorted"} else {"Unsorted"}, solver.get_name(), result.len());
+        }
     }
     
 }
