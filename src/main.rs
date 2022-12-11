@@ -6,9 +6,34 @@ Offline, as in all object dimensions are known before-hand
 use rand::{thread_rng, Rng};
 use std::fs;
 use rand::seq::SliceRandom;
-
 use serde::{Deserialize, Serialize};
 use serde_json::Result;
+use std::time::Instant;
+use std::cmp;
+
+
+#[derive(Clone, Serialize, Deserialize, Default)]
+struct ProblemResult {
+    solver_name: String,
+    solver_sorted: bool,
+
+    item_size_min: u32,
+    item_size_max: u32,
+    item_limit: u32,
+
+    container_size: u32,
+
+    iterations: u32,
+    optimal_solutions_found: u32,
+
+    quality_best_case: f32,
+    quality_worst_case: f32,
+    quality_avg_case: f32,
+
+    time_us_best_case: u128,
+    time_us_worst_case: u128,
+    time_us_avg_case: f32
+}
 
 
 #[derive(Clone)]
@@ -218,7 +243,8 @@ struct SolverListItem {
 #[derive(Clone, Serialize, Deserialize)]
 struct ProgramInput {
     solvers: Vec<SolverListItem>,
-    settings: Vec<Settings>
+    settings: Vec<Settings>,
+    iterations: u32
 }
 
 fn generate_solver(string: String, settings: Settings) -> Option<Box<dyn Solver>> {
@@ -236,32 +262,95 @@ fn main() {
     println!("{}", data);
 
     let program_input: ProgramInput = serde_json::from_str(&data[..]).unwrap();
+    let mut results: Vec<ProblemResult> = Vec::new();
+
+    let settings_length = program_input.settings.len();
+    let solvers_length = program_input.solvers.len();
+
+    for _ in 0..settings_length {
+        for _ in 0..solvers_length {
+            results.push(ProblemResult::default());
+        }
+    }
     
-    for settings in program_input.settings {
+    for (settings_n, settings) in program_input.settings.iter().enumerate() {
         let generator: Generator = Generator { 
             settings: settings.clone()
         };
         let mut solvers: Vec<Box<dyn Solver>> = Vec::new();
     
-        let generator_results: GeneratorResults = generator.generate();
-        let items: Vec<Item> = generator_results.items;
-    
-        println!("Optimal solution: {:} containers", generator_results.optimal_container_count);
-
-        let solvers_list = program_input.solvers.clone();
+        for _ in 0..program_input.iterations {
+            let generator_results: GeneratorResults = generator.generate();
+            let items: Vec<Item> = generator_results.items;
         
-        for solver_list_item in solvers_list {
-            let solver = generate_solver(solver_list_item.id, settings.clone()).unwrap();
-            let sorted = solver_list_item.sorted;
-            let mut items_copy: Vec<Item> = items.clone();
-            if sorted {
-                items_copy.sort_unstable_by_key(|x| x.size);
-                items_copy.reverse();
-            }
-            let result: Vec<Container> = solver.solve(items_copy);
+            println!("Optimal solution: {:} containers", generator_results.optimal_container_count);
+
+            let solvers_list = program_input.solvers.clone();
+            
+            for (solver_n, solver_list_item) in solvers_list.into_iter().enumerate() {
+                let solver = generate_solver(solver_list_item.id, settings.clone()).unwrap();
+                let sorted = solver_list_item.sorted;
+
+                let result_i = settings_n * solvers_length + solver_n;
+                if results[result_i].iterations == 0 {
+                    results[result_i] = ProblemResult {
+                        solver_name: solver.get_name(),
+                        solver_sorted: sorted,
     
-            println!("Results for {:} {:} - {:} containers", if sorted {"Desc-sorted"} else {"Unsorted"}, solver.get_name(), result.len());
+                        item_size_min: settings.item_size_min,
+                        item_size_max: settings.item_size_max,
+                        item_limit: settings.item_limit,
+    
+                        container_size: settings.container_size,
+                        iterations: 0,
+                        optimal_solutions_found: 0,
+    
+                        quality_best_case: f32::MAX,
+                        quality_worst_case: 0.0,
+                        quality_avg_case: 0.0,
+    
+                        time_us_best_case: u128::MAX,
+                        time_us_worst_case: 0,
+                        time_us_avg_case: 0.0
+                    };
+                }
+
+                let mut items_copy: Vec<Item> = items.clone();
+
+                let now = Instant::now();
+                // Sorting the array is timed as a part of the solver
+                if sorted {
+                    items_copy.sort_unstable_by_key(|x| x.size);
+                    items_copy.reverse();
+                }
+                let result: Vec<Container> = solver.solve(items_copy);
+                let elapsed_us = now.elapsed().as_micros();
+
+                results[result_i].iterations += 1;
+
+                let quality: f32 = result.len() as f32 / generator_results.optimal_container_count as f32; 
+
+                results[result_i].optimal_solutions_found += if quality == 1.0 {1} else {0};
+                results[result_i].quality_avg_case += (quality - results[result_i].quality_avg_case) / results[result_i].iterations as f32;
+                results[result_i].quality_worst_case = f32::max(results[result_i].quality_worst_case, quality);
+                results[result_i].quality_best_case = f32::min(results[result_i].quality_best_case, quality);
+
+                results[result_i].time_us_avg_case += (elapsed_us as f32 - results[result_i].time_us_avg_case) / results[result_i].iterations as f32;
+                results[result_i].time_us_worst_case = cmp::max(results[result_i].time_us_worst_case, elapsed_us);
+                results[result_i].time_us_best_case = cmp::min(results[result_i].time_us_best_case, elapsed_us);
+
+
+                println!("Results for {:} {:} - {:} containers, {:} us", if sorted {"Desc-sorted"} else {"Unsorted"}, solver.get_name(), result.len(), elapsed_us);
+            }
+
+
         }
+        
     }
+
+    //let final_results = results.into_iter().flatten().collect();
+    let slice_string_in_json_format = serde_json::to_string(&results);
+    println!("{:}", slice_string_in_json_format.unwrap());
+
     
 }

@@ -16,14 +16,16 @@
         {
             "item_size_min": 100,
             "item_size_max": 700,
-            "item_limit": 50000,
+            "item_limit": 500,
             "container_size": 10000
         },
         {
             "item_size_min": 500,
             "item_size_max": 700,
-            "item_limit": 50000,
+            "item_limit": 500,
             "container_size": 10000
         }
-    ]
+    ],
+
+    "iterations": 3
 }
