@@ -1,3 +1,5 @@
+# Format DocuWiki
+
 ==== Projekt: Jednowymiarowy problem pakowania (1D-BPP) ====
 
 ^ Data ^ Status projektu    ^ Uwagi ^
